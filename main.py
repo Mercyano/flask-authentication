@@ -1,9 +1,20 @@
+import random
+import string
 from flask import Flask, render_template, request, url_for, redirect, flash, send_from_directory
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import UserMixin, login_user, LoginManager, login_required, current_user, logout_user
+from flask_mail import Mail, Message
 
 app = Flask(__name__)
+
+app.config['MAIL_SERVER'] = 'smtp.gmail.com'
+app.config['MAIL_PORT'] = 465
+app.config['MAIL_USERNAME'] = 'noreply.staybatu@gmail.com'
+app.config['MAIL_PASSWORD'] = 'shepwmxhuxbpgqpw'
+app.config['MAIL_USE_TLS'] = False
+app.config['MAIL_USE_SSL'] = True
+posta = Mail(app)
 
 app.config['SECRET_KEY'] = 'secret-key-goes-here'
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'
@@ -27,7 +38,8 @@ class User(UserMixin, db.Model):
     username = db.Column(db.String(100))
     alamat = db.Column(db.String(1000))
     telp = db.Column(db.String(20))
-# db.create_all()
+    token = db.Column(db.String(120))
+db.create_all()
 
 
 @app.route('/')
@@ -97,6 +109,56 @@ def secrets():
 def logout():
     logout_user()
     return redirect(url_for('home'))
+
+
+@app.route('/reset', methods=["GET", "POST"])
+def reset():
+    if request.method == "POST":
+        email = request.form.get('email')
+
+        user = User.query.filter_by(email=email).first()
+        # Email doesn't exist or password incorrect.
+        if not user:
+            flash("That email does not exist, please try again.")
+            return redirect(url_for('reset'))
+        else:
+            token = ''.join(random.choices(
+                string.ascii_letters + string.digits, k=24))
+            user.token = token
+            db.session.commit()
+            msg = Message('Confirm Password Change',
+                          sender='noreply.staybatu@gmail.com', recipients=[email])
+            msg.body = f"Hello,\nWe've received a request to reset your password. If you want to reset your password, click the link below and enter your new password\n http://localhost:5000/reset/{user.token}"
+            posta.send(msg)
+            flash("Please check your email for password reset!")
+
+    return render_template("reset.html")
+
+
+@app.route("/reset/")
+@app.route("/reset/<string:token>", methods=["GET", "POST"])
+def token(token):
+    user = User.query.filter_by(token=token).first()
+    if not user:
+        flash("Invalid token, please try again.")
+        return redirect(url_for('reset'))
+    else:
+        if request.method == 'POST':
+            passw = request.form.get('passw')
+            cpassw = request.form.get('cpassw')
+            if passw == cpassw:
+                user.password = generate_password_hash(
+                    passw,
+                    method='md5',
+                )
+                user.token = None
+                db.session.commit()
+                flash("Your password has been changed. Please login.")
+                return redirect(url_for('login'))
+            else:
+                flash('Password and confirm password must be the same')
+
+    return render_template('change_password.html')
 
 
 if __name__ == "__main__":
